@@ -1,0 +1,167 @@
+# #################################
+# Training ECAPA-TDNN embeddings Speaker Recognition on parts of VoxCeleb2
+# #################################
+
+# Seed needs to be set at top of yaml, before objects with parameters are made
+seed: 1986
+__set_seed: !apply:speechbrain.utils.seed_everything [!ref <seed>]
+test_only: False
+
+dropout_prob: !!float 0.1
+do_embedding_augmentation: True
+emb_aug_std: !!float 0.1
+emb_aug_mean: !!float 0.0
+max_lr: 0.001
+min_lr: 0.00001
+num_eps: !!int 10
+
+# Set up folders for reading from and writing to
+# Dataset will be downloaded to the `data_folder`
+restricted_language: !ref en
+
+exp_name: !ref dropout<dropout_prob>_linLr_max<max_lr>__embStd<emb_aug_std>_embMean<emb_aug_mean>_numEps<num_eps>
+output_folder: !ref results_simpleProjection_1Layer_after_VoxCeleb2_pretraining/VoxCeleb2_pretraining/<exp_name>/no_<restricted_language>/<seed>
+save_folder: !ref <output_folder>/save
+train_log: !ref <output_folder>/train_log.txt
+
+audio_embedding_ECAPA_folder: !ref VOXCELEB2_EMBEDDINGS_DIR/voice_embeddings/ECAPA_embeddings/originalECAPA_prefc
+audio_embedding_AG_folder: !ref VOXCELEB2_EMBEDDINGS_DIR/voice_embeddings/wav2vec2_large_age_gender_embeddings
+visual_embedding_folder: !ref VOXCELEB2_EMBEDDINGS_DIR/face_embeddings/VGGFace_embeddings/fc6
+visual_embedding_VIT_folder: !ref VOXCELEB2_EMBEDDINGS_DIR/face_embeddings/VIT_age_gender_embeddings
+
+audio_train_csv: !ref ./03_prepare_fid_lists_VoxCeleb2/fid_lists/train_voices_no_<restricted_language>.csv
+visual_train_csv: !ref ./03_prepare_fid_lists_VoxCeleb2/fid_lists/train_faces_no_<restricted_language>.csv
+
+val_heard_audio_csv: !ref ./03_prepare_fid_lists_VoxCeleb2/fid_lists/val_voices_no_<restricted_language>.csv
+val_heard_visual_csv: !ref ./03_prepare_fid_lists_VoxCeleb2/fid_lists/val_faces_no_<restricted_language>.csv
+val_heard_trials_csv: !ref ./03_prepare_fid_lists_VoxCeleb2/fid_lists/val_trials_no_<restricted_language>.csv
+
+
+
+# The train logger writes training statistics to a file, as well as stdout.
+train_logger: !new:speechbrain.utils.train_logger.FileTrainLogger
+    save_file: !ref <train_log>
+
+error_stats: !name:speechbrain.utils.metric_stats.MetricStats
+    metric: !name:speechbrain.nnet.losses.classification_error
+        reduction: batch
+
+####################### Training Parameters ####################################
+
+# Training parameters btw: 40 - 80
+number_of_epochs: !ref <num_eps> #10
+batch_size_audio: 16
+batch_size_visual: 16
+batch_size_test: 128
+n_speaker: 5572 #44 #43
+emb_dim: 192
+
+
+# Dataloaders
+num_workers: 8
+drop_last: True
+audio_train_dataloader_options:
+    num_workers: !ref <num_workers>
+    batch_size: !ref <batch_size_audio>
+    drop_last: !ref <drop_last>
+    shuffle: True
+
+visual_train_dataloader_options:
+    num_workers: !ref <num_workers>
+    batch_size: !ref <batch_size_visual>
+    drop_last: !ref <drop_last>
+    shuffle: True
+
+audio_valid_dataloader_options:
+    num_workers: !ref <num_workers>
+    batch_size: !ref <batch_size_test>
+    shuffle: False
+
+visual_valid_dataloader_options:
+    num_workers: !ref <num_workers>
+    batch_size: !ref <batch_size_test>
+    shuffle: False
+
+audio_test_dataloader_options:
+    num_workers: !ref <num_workers>
+    batch_size: !ref <batch_size_test>
+    shuffle: False
+
+visual_test_dataloader_options:
+    num_workers: !ref <num_workers>
+    batch_size: !ref <batch_size_test>
+    shuffle: False
+
+
+############################## Models ##########################################
+
+# To design a custom model, either just edit the simple CustomModel
+# class that's listed here, or replace this `!new` call with a line
+# pointing to a different file you've defined.
+
+# Embedding Model
+projection_model_audio: !new:models.embedding_projektion.ProjectionHead
+    in_dim: 7168
+    out_dim: !ref <emb_dim>
+    dropout: !ref <dropout_prob>
+
+projection_model_visual: !new:models.embedding_projektion.ProjectionHead
+    in_dim: 4864 #4096
+    out_dim: !ref <emb_dim>
+    dropout: !ref <dropout_prob>
+
+
+# Classifier based on cosine distance
+classifier: !new:speechbrain.lobes.models.ECAPA_TDNN.Classifier
+    input_size: !ref <emb_dim>
+    out_neurons: !ref <n_speaker>
+
+# The first object passed to the Brain class is this "Epoch Counter"
+# which is saved by the Checkpointer so that training can be resumed
+# if it gets interrupted at any point.
+epoch_counter: !new:speechbrain.utils.epoch_loop.EpochCounter
+    limit: !ref <number_of_epochs>
+
+# Objects in "modules" dict will have their parameters moved to the correct
+# device, as well as having train()/eval() called on them by the Brain class.
+modules:
+    projection_model_audio: !ref <projection_model_audio>
+    projection_model_visual: !ref <projection_model_visual>
+    classifier: !ref <classifier>
+
+# Additive Angular Margin
+compute_cost: !new:speechbrain.nnet.losses.LogSoftmaxWrapper
+    loss_fn: !new:speechbrain.nnet.losses.AdditiveAngularMargin
+        margin: 0.2
+        scale: 30
+
+
+# This optimizer will be constructed by the Brain class after all parameters
+# are moved to the correct device. Then it will be added to the checkpointer.
+opt_class: !name:torch.optim.Adam
+    lr: !ref <max_lr>
+    weight_decay: 0.000002
+
+# lr_annealing: !new:speechbrain.nnet.schedulers.CyclicLRScheduler
+#     base_lr: !ref <base_lr>
+#     max_lr: !ref <max_lr>
+#     step_size: !ref <step_size>
+
+lr_annealing: !new:speechbrain.nnet.schedulers.LinearScheduler
+    initial_value: !ref <max_lr>
+    final_value: !ref <min_lr>
+    epoch_count: !ref <number_of_epochs>
+
+
+############################## Logging and Pretrainer ##########################
+
+# This object is used for saving the state of training both so that it
+# can be resumed if it gets interrupted, and also so that the best checkpoint
+# can be later loaded for evaluation or inference.
+checkpointer: !new:speechbrain.utils.checkpoints.Checkpointer
+    checkpoints_dir: !ref <save_folder>
+    recoverables:
+        projection_model_audio: !ref <projection_model_audio>
+        projection_model_visual: !ref <projection_model_visual>
+        classifier: !ref <classifier>
+        counter: !ref <epoch_counter>

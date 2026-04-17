@@ -1,0 +1,4 @@
+Download the VGGFace model from:
+http://www.robots.ox.ac.uk/~vgg/software/vgg_face/
+
+Then add vgg_face_mod.py to folder ./vgg_face_pytorch/models

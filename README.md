@@ -24,4 +24,6 @@ Virtual environment for speechbrain based training.
 sh prep_venv_preparation.sh
 ```
 
+### 3. Data preparation
+Execute all bash files from [01_prepare_embeddings](./01_prepare_embeddings).
 

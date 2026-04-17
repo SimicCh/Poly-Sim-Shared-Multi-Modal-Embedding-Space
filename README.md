@@ -14,6 +14,14 @@ git clone https://github.com/SimicCh/Poly-Sim-Shared-Multi-Modal-Embedding-Space
 cd Poly-Sim-Shared-Multi-Modal-Embedding-Space
 ```
 
-### 
+### 2. Prepare venvs
+Virtual environment for data preparation.
+```bash
+sh prep_venv_preparation.sh
+```
+Virtual environment for speechbrain based training.
+```bash
+sh prep_venv_preparation.sh
+```
 
 
